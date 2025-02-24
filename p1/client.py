@@ -1,99 +1,142 @@
 import os
 import socket
 
-# Load peer settings
-def load_peer_settings():
-    peer_settings = {}
-    with open("../peer_settings.txt", "r") as f:
-        for line in f:
-            peer_id, ip, port = line.strip().split()
-            peer_settings[peer_id] = (ip, int(port))
+
+#Function to load peer settings info
+def LoadPeerSettingsFile():
+    #Create a dictionary to store peer settings
+    peer_settings = dict()
+
+    #Read from peer_settings.txt file
+    with open("../peer_settings.txt", "r") as file:
+        for Line in file:
+            peer_id , ipAddr, portNum = Line.strip().split()
+            #Key value pair of peer id and info is created
+            peer_settings[peer_id] = (ipAddr, int(portNum))
+    
+    #Return the peer_settings dictionary 
     return peer_settings
 
-peer_settings = load_peer_settings()
+#Global variable containing dictionary of peer and its information
+peer_settings = LoadPeerSettingsFile()
 
-# Send request to a peer
-def send_request(peer_id, request):
-    if peer_id not in peer_settings:
-        print(f"Peer {peer_id} not found in settings.")
+
+#Function to send request to a peer
+def SendRequest(Peer_Id, Request):
+
+    #The peer is not a known peer in peer_settings
+    if Peer_Id not in peer_settings:
         return
+    
+    #The peer is a known peer in peer_settings
+    #Get the IP and PortNum of the peer
+    ip, PortNum = peer_settings[Peer_Id]
 
-    ip, port = peer_settings[peer_id]
+    #Try connecting to the server of the specified peer
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.connect((ip, port))
-            s.send(request.encode("utf-8"))
-            response = s.recv(4096).decode("utf-8")
-            print(response)
-    except Exception as e:
-        print(f"Error communicating with {peer_id}: {e}")
+        #Connect using socket with the ip and port number of the peer
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.connect((ip,PortNum))
+            sock.send(Request.encode("utf-8"))
+            #Print the sent request in terminal
+            print(f"Client ({Peer_Id}): {Request}")
+            response_msg = sock.recv(1024) .decode("utf-8")
+            print(f"Server ({Peer_Id}): {response_msg}")
+            return response_msg
+    except Exception as ex:
+        print(f"Error connecting to {Peer_Id}: {ex}")
+    finally:
+        #close the socket
+        sock.close()
 
-# #FILELIST command
-def filelist(peers):
-    for peer_id in peers:
-        request = "#FILELIST"
-        send_request(peer_id, request)
+def FILELIST(Peers):
+    #Request to be sent
+    Request = "#FILELIST"
+    for Peer_Id in Peers:
+        #Send the request to the respective peer
+        SendRequest(Peer_Id, Request)
 
-# #UPLOAD command
-def upload(filename, peers):
-    filepath = os.path.join("served_files", filename)
-    if not os.path.exists(filepath):
-        print(f"Peer does not serve file {filename}")
+
+def FilesServedByClient():
+    #Function to get the list of files served by client
+    #Based on the served_files directory of client
+    Files = []
+    for filename in os.listdir('served_files'):
+        Files.append(filename)
+    return Files
+
+def GetFileSize(Filename):
+    #Function to get Size of File based on filename
+    size = os.path.getsize(f'served_files/{Filename}')
+    return size
+
+def UPLOAD(Filename, Peers, currentClient):
+    #Call the function to get the list of files served by current client
+    FilesServed = FilesServedByClient()
+
+    #File path for the file to be uploaded
+    filepath = os.path.join("served_files", Filename)
+
+    #If the peer does not have the file to upload
+    if Filename not in FilesServed:
+        print(f"Peer {currentClient} does not serve file {Filename}")
         return
+    
+    #The peer has the file to upload
+    SizeOfFile = GetFileSize(Filename)
+    print(f"Uploading file {Filename}")
+    Request = f"#UPLOAD {Filename} bytes {SizeOfFile}"
 
-    for peer_id in peers:
-        try:
-            ip, port = peer_settings[peer_id]
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.connect((ip, port))
-                s.send(f"#UPLOAD {filename}".encode("utf-8"))
-                response = s.recv(1024).decode("utf-8")
-                print(response)
+    for Peer_Id in Peers:
+        #Send the request to the respective peer
+        response = SendRequest(Peer_Id, Request)
 
-                if "330 Ready to receive" in response:
-                    with open(filepath, "rb") as f:
-                        while chunk := f.read(1024):
-                            s.send(chunk)
-                    s.send(b"")  # Signal end of file
-                    print(s.recv(1024).decode("utf-8"))
-        except Exception as e:
-            print(f"Error uploading to {peer_id}: {e}")
+        if response.startswith("330"):
 
-# #DOWNLOAD command
-def download(filename, peer_id):
-    try:
-        ip, port = peer_settings[peer_id]
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.connect((ip, port))
-            s.send(f"#DOWNLOAD {filename}".encode("utf-8"))
-            response = s.recv(1024).decode("utf-8")
-            print(response)
+            with open(filepath, "rb") as f:
+                chunk_id = 0
+                while chunk := f.read(100):
+                    chunkRequest = f"#UPLOAD {Filename} chunk {chunk_id} {chunk.decode('utf-8')}"
+                    SendRequest(Peer_Id, chunkRequest)
+                    chunk_id +=1
 
-            if "330 Ready to send" in response:
-                with open(os.path.join("served_files", filename), "wb") as f:
-                    while True:
-                        data = s.recv(1024)
-                        if not data:
-                            break
-                        f.write(data)
-                print("Download complete.")
+            completion_response = SendRequest(Peer_Id, "UPLOAD_COMPLETE")
+            
+            if completion_response and "200 File" in completion_response:
+                print(f"File {Filename} upload success to {Peer_Id}")
             else:
-                print(response)
-    except Exception as e:
-        print(f"Error downloading from {peer_id}: {e}")
+                print(f"File {Filename} upload failed to {Peer_Id}")
 
-# Main client loop
+
+
+
+
+    
+
 if __name__ == "__main__":
+    # Get the name of the current client launching client.py 
+    current_client = os.path.basename(os.getcwd())
+    
+    #Continuously get command from the client
     while True:
-        command = input("Enter command: ").strip()
-        if command.startswith("#FILELIST"):
-            _, *peers = command.split()
-            filelist(peers)
-        elif command.startswith("#UPLOAD"):
-            _, filename, *peers = command.split()
-            upload(filename, peers)
-        elif command.startswith("#DOWNLOAD"):
-            _, filename, peer_id = command.split()
-            download(filename, peer_id)
+        #Command from user input
+        Command = input("Input your command: ")
+
+        #FILELIST COMMAND
+        if Command.startswith("#FILELIST"):
+            _, *Peers = Command.split()
+            FILELIST(Peers)
+        
+        #UPLOAD COMMAND
+        elif Command.startswith("#UPLOAD"):
+            _, Filename ,*Peers = Command.split()
+            UPLOAD(Filename, Peers, current_client)
+
+        #DOWNLOAD COMMAND
+        elif Command.startswith("#DOWNLOAD"):
+            _, *Peers = Command.split()
+            DOWNLOAD(Peers)
+        
+        #INVALID COMMAND
         else:
-            print("Invalid command.")
+            print("The command is invalid")

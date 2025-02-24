@@ -2,65 +2,57 @@ import os
 import socket
 import threading
 
-# Server Configuration
-peer_id = "p1"  # Change this for each peer
-server_port = 4441  # Change this for each peer
-served_files_dir = "served_files"
+# Name of directory containing served files
+servedFilesDirectory = "served_files"
 
-# Handle client requests
+peer_ID = "p1"
+server_port_number = 4441
+
+class ServerThread(threading.Thread):
+    def __init__(self, client):
+        threading.Thread.__init__(self)
+        self.client = client
+    def run(self):
+        handle_client(self.client)
+
+class ServerMain:
+    def run_server(self):
+        serverPort = server_port_number
+        serverSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        serverSocket.bind(("localhost", server_port_number))
+        serverSocket.listen(5)
+        print(f"Server {peer_ID} is now listening on port {serverPort}..")
+
+        while True:
+            client_socket, addr = serverSocket.accept()
+            print(f"Connection from {addr}")
+            t = ServerThread(client_socket)
+            t.start()
+
+def FILELIST_SERVER(client_socket):
+    filesServed = " ".join(os.listdir(servedFilesDirectory))
+    responseMessage = f"200 Files served: {filesServed}"
+    print(responseMessage)
+    client_socket.send(responseMessage.encode("utf-8"))
+
+
 def handle_client(client_socket):
     try:
-        request = client_socket.recv(1024).decode("utf-8").strip()
-        print(f"Request received: {request}")
+        clientRequest = client_socket.recv(1024).decode("utf-8").strip()
+        print(f"Client Request received: {clientRequest}")
 
-        if request.startswith("#FILELIST"):
-            files = " ".join(os.listdir(served_files_dir))
-            response = f"200 Files served: {files}"
-            client_socket.send(response.encode("utf-8"))
-
-        elif request.startswith("#UPLOAD"):
-            _, filename = request.split()
-            client_socket.send("330 Ready to receive".encode("utf-8"))
-
-            # Receive file
-            with open(os.path.join(served_files_dir, filename), "wb") as f:
-                while True:
-                    data = client_socket.recv(1024)
-                    if not data:
-                        break
-                    f.write(data)
-            client_socket.send("200 Upload complete".encode("utf-8"))
-
-        elif request.startswith("#DOWNLOAD"):
-            _, filename = request.split()
-            filepath = os.path.join(served_files_dir, filename)
-            if os.path.exists(filepath):
-                client_socket.send("330 Ready to send".encode("utf-8"))
-                with open(filepath, "rb") as f:
-                    while chunk := f.read(1024):
-                        client_socket.send(chunk)
-                client_socket.send(b"")  # Signal end of file
-            else:
-                client_socket.send("250 File not found".encode("utf-8"))
-        else:
-            client_socket.send("250 Invalid command".encode("utf-8"))
-
+        if clientRequest.startswith("#FILELIST"):
+            FILELIST_SERVER(client_socket)
+    
     except Exception as e:
-        print(f"Error: {e}")
+        print("error")
     finally:
         client_socket.close()
 
-# Main server loop
-def server():
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.bind(("localhost", server_port))
-    server_socket.listen(5)
-    print(f"Server {peer_id} listening on port {server_port}...")
 
-    while True:
-        client_socket, addr = server_socket.accept()
-        print(f"Connection from {addr}")
-        threading.Thread(target=handle_client, args=(client_socket,)).start()
 
 if __name__ == "__main__":
-    server()
+    server = ServerMain()
+    server.run_server()
+
+    
