@@ -67,15 +67,14 @@ class ServerThread(threading.Thread):
             active_file_uploads.remove(filename)
             client_socket.send(f"200 File {filename} received".encode('utf-8'))
     
-    def DOWNLOAD_SERVER(self, client_socket, request):
-        print("Entered Download function")
+    def DOWNLOAD_SERVER_INITIAL_CHECK(self, client_socket, request):
+        print("Entered Download check function")
         _, filename = request.split()
         filepath = os.path.join(servedFilesDirectory, filename)
 
         if os.path.exists(filepath):
             SizeOfFile = GetFileSize(filename)
             response = f"330 Ready to send {filename} bytes {SizeOfFile}"
-            #Create a set of downloading files
         else:
             response = f"250 Not serving file {filename}"
 
@@ -83,8 +82,20 @@ class ServerThread(threading.Thread):
 
         client_socket.send(response.encode("utf-8"))
 
-        if response.startswith("330"):
-            pass
+    def HANDLE_DOWNLOAD_CHUNK_REQUEST(self, client_socket, filename, chunk_ID):
+        print("Entered Handle Download chunk request function")
+        filepath = os.path.join(servedFilesDirectory, filename)
+        chunkSize = 100
+
+        try:
+            with open(filepath, 'rb') as file:
+                file.seek(chunk_ID * chunkSize)
+                chunkData = file.read(chunkSize)
+                response = f"200 File {filename} chunk {chunk_ID} {chunkData.decode('utf-8', errors='ignore')}"
+                client_socket.send(response.encode('utf-8'))
+        except Exception as e:
+            print(f"Error reading chunk {chunk_ID} from file {filename}: {e}")
+            client_socket.send(f"250 Error reading chunk {chunk_ID}".encode("utf-8"))
         
 
     def run(self):
@@ -98,7 +109,16 @@ class ServerThread(threading.Thread):
             elif clientRequest.startswith("#UPLOAD"):
                 self.UPLOAD_SERVER(client_socket, clientRequest)
             elif clientRequest.startswith("#DOWNLOAD"):
-                self.DOWNLOAD_SERVER(client_socket, clientRequest)
+                parts = clientRequest.split()
+                command = parts[0]
+                filename = parts[1]
+
+                if len(parts) == 2:
+                    self.DOWNLOAD_SERVER_INITIAL_CHECK(client_socket,clientRequest)
+                elif len(parts) == 4 and parts[2] == "chunk":
+                    chunk_ID = int(parts[3])
+                    self.HANDLE_DOWNLOAD_CHUNK_REQUEST(client_socket, filename, chunk_ID)
+                
         
         except Exception as e:
             print(e)

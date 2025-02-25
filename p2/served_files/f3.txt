@@ -168,7 +168,7 @@ str.join(iterable)	Return a string which is the concatenation of the strings in 
 
 IV. TESTING SCHEME
 #FILELIST
-1)Retrieve the file lists from multiple servers.
+1)) Retrieve the file lists from multiple servers.
 #UPLOAD
 2)Upload a file to multiple servers.
 3)Multiple clients upload different files to the same server.

@@ -23,9 +23,6 @@ def LoadPeerSettingsFile():
 peer_settings = LoadPeerSettingsFile()
 
 
-
-
-
 def FilesServedByClient():
     #Function to get the list of files served by client
     #Based on the served_files directory of client
@@ -38,6 +35,15 @@ def GetFileSize(Filename):
     #Function to get Size of File based on filename
     size = os.path.getsize(f'served_files/{Filename}')
     return size
+
+def GetNumberOfChunks(Filesize):
+    chunkSize = 100
+    fullChunks = Filesize // chunkSize
+
+    if Filesize % chunkSize >0:
+        fullChunks += 1
+    
+    return fullChunks
 
 
 
@@ -54,7 +60,7 @@ class ClientMain:
         self.LocalPeerID = os.path.basename(os.getcwd())
 
     #Function to send request to a peer
-    def SendFileRequest(self,Peer_Id, Request):
+    def SendFileListRequest(self,Peer_Id, Request):
 
         #The peer is not a known peer in peer_settings
         if Peer_Id not in peer_settings:
@@ -138,7 +144,7 @@ class ClientMain:
             #close the socket
             sock.close()
     
-    def SendDownloadRequest(self,Peer_Id, Request, Filename):
+    def SendDownloadRequest(self,Peer_Id, Request, Filename, initialRequest = True):
         if Peer_Id not in peer_settings:
             return
         
@@ -151,23 +157,26 @@ class ClientMain:
                 sock.send(Request.encode("utf-8"))
                 print(f"Client ({Peer_Id}): {Request}")
                 response_msg = sock.recv(1024) .decode("utf-8")
-                print(f"Server ({Peer_Id}): {response_msg}")
+                if initialRequest:
+                    print(f"Server ({Peer_Id}): {response_msg}")
+                else:
+                    responseCode, File, fileName, chunk, chunkid, chunkData = response_msg.split(" ", 5)
+                    print(f"Server ({Peer_Id}): {responseCode} {File} {fileName} {chunk} {chunkid}")
                 time.sleep(0.5)
+                return response_msg
         except Exception as ex:
             print(f"TCP connection to {Peer_Id} has failed: {ex}")
             print(f"File {Filename} download failed")
         finally:
             #close the socket
             sock.close()
-
-        pass
     
     def FILELIST(self, Peers):
         #Request to be sent
         Request = "#FILELIST"
         threads = []
         for Peer_Id in Peers:
-            thread = ClientThread(self.SendFileRequest, Peer_Id, Request)
+            thread = ClientThread(self.SendFileListRequest, Peer_Id, Request)
             thread.start()
             threads.append(thread)
         
@@ -190,7 +199,6 @@ class ClientMain:
         SizeOfFile = GetFileSize(Filename)
         Request = f"#UPLOAD {Filename} bytes {SizeOfFile}"
 
-
         threads = []
 
         for Peer_Id in Peers:
@@ -212,12 +220,84 @@ class ClientMain:
         
         print(f"Downloading file {Filename}")
         Request = f"#DOWNLOAD {Filename}"
-        threads = []
 
+        SizeOfFile = 0
+
+        # Send the initial #DOWNLOAD request to all peers check if they serve the file
+        servingPeersList = []
         for Peer_Id in Peers:
-            thread = ClientThread(self.SendDownloadRequest, Peer_Id, Request, Filename)
-            thread.start()
+            response = self.SendDownloadRequest(Peer_Id, Request,Filename)
+            if response and response.startswith("330"):  # Peer is serving the file
+                _, _, _, _, _, _, filesizeInBytes = response.split(" ")
+                servingPeersList.append(Peer_Id)
+                SizeOfFile = int(filesizeInBytes)
+
+
+        if not servingPeersList:
+            print(f"File {Filename} download failed, peers {', '.join(Peers)} are not serving the file")
+            return
+
+        FileDownloadFailed = False 
+        chunk_size = 100  # Define the chunk size (in bytes)
+        chunk_id = 0
+        chunks = {}
+        threads = []
+        NumberOfChunksInFile = GetNumberOfChunks(SizeOfFile)
+
+        class DownloadFileChunkThread(threading.Thread):
+            def __init__(self, client_instance ,peer_id, chunk_id):
+                super().__init__()
+                self.client_instance = client_instance
+                self.peer_id = peer_id
+                self.chunk_id = chunk_id
+
+            def run(self):
+                nonlocal FileDownloadFailed
+
+                chunkRequest = f"#DOWNLOAD {Filename} chunk {self.chunk_id}"
+
+                try:
+                    response = self.client_instance.SendDownloadRequest(self.peer_id, chunkRequest,Filename,False)
+
+                    if response and response.startswith("200"):
+                        _, _, _, _, _, chunk_data = response.split(" ", 5)
+                        chunks[self.chunk_id] = chunk_data.encode("utf-8")
+                except Exception as e:
+                    print(f"Error downloading chunk {self.chunk_id} from {self.peer_id}: {e}")
+
+        
+        while True:
+            peerIndex = chunk_id % len(servingPeersList)
+
+            peerID = servingPeersList[peerIndex]
+
+            thread = DownloadFileChunkThread(self, peerID, chunk_id)
             threads.append(thread)
+            thread.start()
+
+            if chunk_id == (NumberOfChunksInFile -1 ):  
+                break
+
+            chunk_id += 1
+        
+        for thread in threads:
+            thread.join()
+
+        # Step 6: Check if all chunks are downloaded
+        if len(chunks) != chunk_id + 1:
+            print(f"File {Filename} download failed")
+            return
+
+        #File path for the file to be downloaded
+        filepath = os.path.join("served_files", Filename)
+
+        # Step 7: Reconstruct the file from chunks
+        with open(filepath, "wb") as f:
+            for i in range(len(chunks)):
+                f.write(chunks[i])
+        print(f"File {Filename} download success")
+
+
 
     def runClient(self):
         while True:

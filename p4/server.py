@@ -11,6 +11,12 @@ servedFilesDirectory = "served_files"
 active_file_uploads = set()
 
 
+def GetFileSize(Filename):
+    #Function to get Size of File based on filename
+    size = os.path.getsize(f'served_files/{Filename}')
+    return size
+
+
 class ServerThread(threading.Thread):
     def __init__(self, client):
         threading.Thread.__init__(self)
@@ -28,7 +34,7 @@ class ServerThread(threading.Thread):
         filepath = os.path.join(servedFilesDirectory, filename)
         if filename in active_file_uploads:
             response = f"250 Currently receiving file {filename}"
-        elif os.path.exists(filepath):
+        if os.path.exists(filepath):
             response = f"250 Already serving file {filename}"
         else:
             response = f"330 Ready to receive file {filename}"
@@ -49,27 +55,55 @@ class ServerThread(threading.Thread):
                         client_socket.send(f"200 File {filename} chunk {chunkID} received".encode('utf-8'))
                     elif chunkRequest == "UPLOAD_COMPLETE":
                         break
+                    elif len(chunkRequest) == 0:
+                        try:
+                            os.remove(filepath)
+                            print(f"Removed unfinished file: {filepath}")
+                        except OSError as e:
+                            print(f"Error removing file: {e}")
+                        raise Exception("Client closed connection")
+
                 
             active_file_uploads.remove(filename)
             client_socket.send(f"200 File {filename} received".encode('utf-8'))
+    
+    def DOWNLOAD_SERVER(self, client_socket, request):
+        print("Entered Download function")
+        _, filename = request.split()
+        filepath = os.path.join(servedFilesDirectory, filename)
+
+        if os.path.exists(filepath):
+            SizeOfFile = GetFileSize(filename)
+            response = f"330 Ready to send {filename} bytes {SizeOfFile}"
+            #Create a set of downloading files
+        else:
+            response = f"250 Not serving file {filename}"
+
+        print(response)
+
+        client_socket.send(response.encode("utf-8"))
+
+        if response.startswith("330"):
+            pass
+        
 
     def run(self):
         client_socket = self.client
         try:
-            while True:
-                clientRequest = client_socket.recv(1024).decode("utf-8").strip()
-                print(f"Client Request received: {clientRequest}")
+            clientRequest = client_socket.recv(1024).decode("utf-8").strip()
+            print(f"Client Request received: {clientRequest}")
 
-                if clientRequest.startswith("#FILELIST"):
-                    self.FILELIST_SERVER(client_socket)
-                elif clientRequest.startswith("#UPLOAD"):
-                    self.UPLOAD_SERVER(client_socket, clientRequest)
-                elif len(clientRequest) == 0:
-                    raise Exception("Client closed connection")
+            if clientRequest.startswith("#FILELIST"):
+                self.FILELIST_SERVER(client_socket)
+            elif clientRequest.startswith("#UPLOAD"):
+                self.UPLOAD_SERVER(client_socket, clientRequest)
+            elif clientRequest.startswith("#DOWNLOAD"):
+                self.DOWNLOAD_SERVER(client_socket, clientRequest)
+        
         except Exception as e:
             print(e)
         finally:
-            client_socket.close()
+            self.client.close()
     
 
 class ServerMain:
@@ -80,11 +114,30 @@ class ServerMain:
         serverSocket.listen(5)
         print(f"Server {peer_ID} is now listening on port {serverPort}..")
 
-        while True:
-            client_socket, addr = serverSocket.accept()
-            print(f"Connection from {addr}")
-            thread = ServerThread(client_socket)
-            thread.start()
+        threads = []
+
+        try:
+            while True:
+                client_socket, addr = serverSocket.accept()
+                print(f"Connection from {addr}")
+                thread = ServerThread(client_socket)
+                thread.start()
+                threads.append(thread)
+
+        except KeyboardInterrupt:
+            print("Server is shutting down.")
+
+        finally:
+
+            serverSocket.close()
+            print("Server socket closed.")
+
+             # Join all threads before exiting
+            for thread in threads:
+                if thread.is_alive():
+                    thread.client.close()
+                thread.join()
+
 
 
 def getServerPortNumber(peerID):
