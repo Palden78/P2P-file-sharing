@@ -189,6 +189,8 @@ class ClientMain:
                 print(f"Client ({Peer_Id}): {Request}")
 
                 response_msg = sock.recv(1024) .decode("utf-8")
+                if len(response_msg) ==0:
+                    return response_msg
                 if initialRequest:
                     #If this is an initiation check request, 
                     #only to first check if the server serves the file client wants to download
@@ -203,7 +205,6 @@ class ClientMain:
                 return response_msg
         except Exception as ex:
             print(f"TCP connection to {Peer_Id} has failed: {ex}")
-            print(f"File {Filename} download failed")
     
     def FILELIST(self, Peers):
         #Request to be sent to the server
@@ -272,6 +273,7 @@ class ClientMain:
                 SizeOfFile = int(filesizeInBytes)
 
 
+        # No peers are serving the file
         if not servingPeersList:
             print(f"File {Filename} download failed, peers {', '.join(Peers)} are not serving the file")
             return
@@ -281,14 +283,16 @@ class ClientMain:
         chunk_id = 0
         chunks = {}
         threads = []
+        stop_event = threading.Event()  # This event will be used to stop downloading if peer leaves
         NumberOfChunksInFile = GetNumberOfChunks(SizeOfFile)
 
         class DownloadFileChunkThread(threading.Thread):
-            def __init__(self, client_instance ,peer_id, chunk_id):
+            def __init__(self, client_instance ,peer_id, chunk_id,stop_event):
                 super().__init__()
                 self.client_instance = client_instance
                 self.peer_id = peer_id
                 self.chunk_id = chunk_id
+                self.stop_event = stop_event
 
             def run(self):
                 nonlocal FileDownloadFailed
@@ -298,44 +302,56 @@ class ClientMain:
                 try:
                     response = self.client_instance.SendDownloadRequest(self.peer_id, chunkRequest,Filename,False)
 
+                    if len(response) ==0:
+                        raise Exception()
+
                     if response and response.startswith("200"):
                         _, _, _, _, _, chunk_data = response.split(" ", 5)
                         chunks[self.chunk_id] = chunk_data.encode("utf-8")
+                    
                 except Exception as e:
-                    print(f"Error downloading chunk {self.chunk_id} from {self.peer_id}: {e}")
+                    self.stop_event.set()
 
         
         while True:
+
+            if len(threads) != 0:
+                lastThread = threads.pop()
+                if lastThread.stop_event.is_set():  # Check if the stop event of the previous thread is set
+                    break
+
             peerIndex = chunk_id % len(servingPeersList)
 
             peerID = servingPeersList[peerIndex]
 
-            thread = DownloadFileChunkThread(self, peerID, chunk_id)
+            thread = DownloadFileChunkThread(self, peerID, chunk_id, stop_event)
             threads.append(thread)
             thread.start()
 
             if chunk_id == (NumberOfChunksInFile -1 ):  
+                #All the chunks have been received
                 break
 
             chunk_id += 1
+            time.sleep(0.5)
         
         for thread in threads:
             thread.join()
 
-        # Step 6: Check if all chunks are downloaded
-        if len(chunks) != chunk_id + 1:
-            print(f"File {Filename} download failed")
-            return
 
+        #Check if all chunks are downloaded
+        if len(chunks) != chunk_id + 1:
+            print(f"File {Filename} download failed")     
+            return
+        
         #File path for the file to be downloaded
         filepath = os.path.join("served_files", Filename)
 
-        # Step 7: Reconstruct the file from chunks
+        # Reconstruct the file from chunks
         with open(filepath, "wb") as f:
             for i in range(len(chunks)):
                 f.write(chunks[i])
         print(f"File {Filename} download success")
-
 
 
     def runClient(self):
