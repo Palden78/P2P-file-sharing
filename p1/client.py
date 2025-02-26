@@ -4,13 +4,17 @@ import threading
 import time
 import sys
 
-#Function to load peer settings info
+
 def LoadPeerSettingsFile():
-    #Create a dictionary to store peer settings
+    #Function to load peer settings info from peer_settings.txt file
+    #First we create a dictionary to store peer settings
     peer_settings = dict()
 
+    #Get the filepath of peer_settings.txt file 
+    file_path = os.path.join("..", "peer_settings.txt")
+
     #Read from peer_settings.txt file
-    with open("../peer_settings.txt", "r") as file:
+    with open(file_path, "r") as file:
         for Line in file:
             peer_id , ipAddr, portNum = Line.strip().split()
             #Key value pair of peer id and info is created
@@ -19,8 +23,9 @@ def LoadPeerSettingsFile():
     #Return the peer_settings dictionary 
     return peer_settings
 
-#Global variable containing dictionary of peer and its information
+#Global variable containing dictionary of peers and their information
 peer_settings = LoadPeerSettingsFile()
+
 
 
 def FilesServedByClient():
@@ -37,14 +42,15 @@ def GetFileSize(Filename):
     return size
 
 def GetNumberOfChunks(Filesize):
+    #Function to get the Number of chunks in a file based on its size
     chunkSize = 100
     fullChunks = Filesize // chunkSize
 
+    #To take the remainder into account and count it as one more chunk
     if Filesize % chunkSize >0:
         fullChunks += 1
     
     return fullChunks
-
 
 
 class ClientThread(threading.Thread):
@@ -56,13 +62,16 @@ class ClientThread(threading.Thread):
         self.target(*self.args)
 
 class ClientMain:
+    #Main class of the client
+    #Get the clients own local peerID based on the current directory name
     def __init__(self):
         self.LocalPeerID = os.path.basename(os.getcwd())
 
-    #Function to send request to a peer
-    def SendFileListRequest(self,Peer_Id, Request):
 
-        #The peer is not a known peer in peer_settings
+    def SendFileListRequest(self,Peer_Id, Request):
+        #Function used to send #FILELIST request to a peer server
+
+        #Case where the peer is not a known peer in peer_settings
         if Peer_Id not in peer_settings:
             return
         
@@ -76,19 +85,23 @@ class ClientMain:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.connect((ip,PortNum))
                 sock.send(Request.encode("utf-8"))
-                #Print the sent request in terminal
+
                 print(f"Client ({Peer_Id}): {Request}")
+                time.sleep(0.5)
+
                 response_msg = sock.recv(1024) .decode("utf-8")
+                if len(response_msg) == 0:
+                    raise Exception("Server closed connection")
                 print(f"Server ({Peer_Id}): {response_msg}")
+
                 return response_msg
+            
         except Exception as ex:
             print(f"TCP connection to {Peer_Id} has failed: {ex}")
-        finally:
-            #close the socket
-            sock.close()
     
-    #Function to send Upload request to a peer
+
     def SendUploadRequest(self,Peer_Id, Request,filepath, Filename):
+        #Function used to send #UPLOAD request to a peer server
 
         #The peer is not a known peer in peer_settings
         if Peer_Id not in peer_settings:
@@ -98,24 +111,35 @@ class ClientMain:
         #Get the IP and PortNum of the peer
         ip, PortNum = peer_settings[Peer_Id]
 
-        #Try connecting to the server of the specified peer
+        chunk_size = 100  # Define the chunk size (in bytes)
+        SizeOfFile = GetFileSize(Filename)   # Get the size of the file
+        NumberOfChunksInFile = GetNumberOfChunks(SizeOfFile)  #Get the number of chunks in the file
+
         try:
+            #Try connecting to the server of the specified peer
             #Connect using socket with the ip and port number of the peer
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.connect((ip,PortNum))
                 print(f"Uploading file {Filename}")
                 sock.send(Request.encode("utf-8"))
-                #Print the sent request in terminal
                 print(f"Client ({Peer_Id}): {Request}")
+
                 response_msg = sock.recv(1024) .decode("utf-8")
+                if len(response_msg) ==0:
+                    raise Exception("Server closed connection")
                 print(f"Server ({Peer_Id}): {response_msg}")
+                
                 time.sleep(0.5)
 
                 if response_msg.startswith("330"):
+                    #The server is ready to receive the file from client
+
                     with open(filepath, "rb") as f:
                         chunk_id = 0
-                        while chunk := f.read(100):
-                            chunkRequest = f"#UPLOAD {Filename} chunk {chunk_id} {chunk.decode('utf-8')}"
+                        while True:
+                            f.seek(chunk_id * chunk_size)
+                            chunk = f.read(chunk_size)
+                            chunkRequest = f"#UPLOAD {Filename} chunk {chunk_id} {chunk.decode('utf-8', errors='ignore')}"
                             sock.send(chunkRequest.encode('utf-8'))
                             command, filename, chunk, chunkID, chunkData = chunkRequest.split(" ",4)
                             print(f"Client ({Peer_Id}): {command} {filename} {chunk} {chunkID}")
@@ -123,31 +147,38 @@ class ClientMain:
                             chunkResponse = sock.recv(1024).decode('utf-8')
                             if len(chunkResponse) == 0:
                                 raise Exception("Server closed connection")
-
                             print(f"Server ({Peer_Id}): {chunkResponse}")
                             time.sleep(0.5)
 
+                            #All the chunks of the file has been uploaded
+                            if chunk_id == (NumberOfChunksInFile - 1 ):
+                                break
+
                             chunk_id +=1
                         
+                        #Send a message to let the server know the upload has been completed
                         sock.send("UPLOAD_COMPLETE".encode('utf-8'))
                         completion_response = sock.recv(1024).decode('utf-8')
+                        print(f"Server ({Peer_Id}): {completion_response}")
+
                     if completion_response and "200 File" in completion_response:
-                        print(f"File {Filename} upload success to {Peer_Id}")
+                        print(f"File {Filename} upload success")
                     else:
                         print(f"File {Filename} upload failed to {Peer_Id}")  
-        except KeyboardInterrupt:
-            print("KEYBOARD INTREEUPT")
         except Exception as ex:
             print(f"TCP connection to {Peer_Id} has failed: {ex}")
             print(f"File {Filename} upload failed to {Peer_Id}")
-        finally:
-            #close the socket
-            sock.close()
+
     
     def SendDownloadRequest(self,Peer_Id, Request, Filename, initialRequest = True):
+        #Function used to send #DOWNLOAD request to a peer server
+
+        #The peer is not a known peer in peer_settings
         if Peer_Id not in peer_settings:
             return
         
+        #The peer is a known peer in peer_settings
+        #Get the IP and PortNum of the peer
         ip, PortNum = peer_settings[Peer_Id]
 
         try:
@@ -156,38 +187,44 @@ class ClientMain:
                 sock.connect((ip,PortNum))
                 sock.send(Request.encode("utf-8"))
                 print(f"Client ({Peer_Id}): {Request}")
+
                 response_msg = sock.recv(1024) .decode("utf-8")
                 if initialRequest:
+                    #If this is an initiation check request, 
+                    #only to first check if the server serves the file client wants to download
                     print(f"Server ({Peer_Id}): {response_msg}")
                 else:
+                    #Not initial request, the request is for chunks
+                    #The response will contain chunk data from the appropriate server
                     responseCode, File, fileName, chunk, chunkid, chunkData = response_msg.split(" ", 5)
                     print(f"Server ({Peer_Id}): {responseCode} {File} {fileName} {chunk} {chunkid}")
+                
                 time.sleep(0.5)
                 return response_msg
         except Exception as ex:
             print(f"TCP connection to {Peer_Id} has failed: {ex}")
             print(f"File {Filename} download failed")
-        finally:
-            #close the socket
-            sock.close()
     
     def FILELIST(self, Peers):
-        #Request to be sent
+        #Request to be sent to the server
         Request = "#FILELIST"
+
+        #Create an array called threads to store threads
         threads = []
         for Peer_Id in Peers:
             thread = ClientThread(self.SendFileListRequest, Peer_Id, Request)
             thread.start()
             threads.append(thread)
         
+        #Ensure all the threads complete before returning to main Thread
         for thread in threads:
             thread.join()
     
     def UPLOAD(self,Filename, Peers, currentClient):
-        #Call the function to get the list of files served by current client
+        #First call the function to get the list of files served by local client
         FilesServed = FilesServedByClient()
 
-        #File path for the file to be uploaded
+        #Get the file path for the file to be uploaded
         filepath = os.path.join("served_files", Filename)
 
         #If the peer does not have the file to upload
@@ -199,21 +236,23 @@ class ClientMain:
         SizeOfFile = GetFileSize(Filename)
         Request = f"#UPLOAD {Filename} bytes {SizeOfFile}"
 
+        #Create an array called threads to store threads
         threads = []
 
         for Peer_Id in Peers:
-            #Send the request to the respective peer
             thread = ClientThread(self.SendUploadRequest, Peer_Id, Request,filepath,Filename)
             thread.start()
             threads.append(thread)
         
+        #Ensure all the threads complete before returning to main Thread
         for thread in threads:
             thread.join()
     
     def DOWNLOAD(self, Filename, Peers, currentClient):
-        
+        #First call the function to get the list of files served by local client
         FilesServed = FilesServedByClient()
 
+        #The local client is already serving the file, download is not required
         if Filename in FilesServed:
             print(f"File {Filename} already exists")
             return
@@ -301,7 +340,7 @@ class ClientMain:
 
     def runClient(self):
         while True:
-            #Command from user input
+            #Prompt the user to enter a command
             Command = input("Input your command: ")
 
             #FILELIST COMMAND
@@ -321,9 +360,10 @@ class ClientMain:
             
             #INVALID COMMAND
             else:
-                print("The command is invalid")
+                print("Sorry, the command is invalid")
         
 
 if __name__ == "__main__":
+    #Create an instance of the ClientMain class and run it
     client = ClientMain()
     client.runClient()
