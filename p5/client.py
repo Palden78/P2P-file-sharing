@@ -139,6 +139,12 @@ class ClientMain:
                 
                 time.sleep(0.5)
 
+                #Even though it was stated on moodle forum that we can assume the files are not empty.
+                #Still check if SizeOfFile is 0 first, and return without uploading (for correctness)
+                if SizeOfFile == 0:
+                    print("The file is empty")
+                    return
+
                 if response_msg.startswith("330"):
                     #The server is ready to receive the file from client
 
@@ -175,7 +181,7 @@ class ClientMain:
                         print(f"File {Filename} upload failed to {Peer_Id}")  
         except Exception as ex:
             print(f"TCP connection to {Peer_Id} has failed: {ex}")
-            print(f"File {Filename} upload failed to {Peer_Id}")
+            print(f"File {Filename} upload failed")
 
     
     def SendDownloadRequest(self,Peer_Id, Request, Filename, initialRequest = True):
