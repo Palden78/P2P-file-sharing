@@ -233,8 +233,14 @@ class ClientMain:
         #First call the function to get the list of files served by local client
         FilesServed = FilesServedByClient()
 
+        # Get the directory of the current script (client.py)
+        current_dir = os.path.dirname(__file__)
+
         #Get the file path for the file to be uploaded
-        filepath = os.path.join("served_files", Filename)
+        served_files_path = os.path.join(current_dir, 'served_files')
+
+       
+        filepath = os.path.join(served_files_path, Filename)
 
         #If the peer does not have the file to upload
         if Filename not in FilesServed:
