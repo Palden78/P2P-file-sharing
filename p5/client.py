@@ -11,7 +11,7 @@ def LoadPeerSettingsFile():
     peer_settings = dict()
 
     #Get the filepath of peer_settings.txt file 
-    file_path = os.path.join("..", "peer_settings.txt")
+    file_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "peer_settings.txt")
 
     #Read from peer_settings.txt file
     with open(file_path, "r") as file:
@@ -32,13 +32,21 @@ def FilesServedByClient():
     #Function to get the list of files served by client
     #Based on the served_files directory of client
     Files = []
-    for filename in os.listdir('served_files'):
+    served_filesPath = os.path.join(os.path.dirname(__file__), "served_files")
+    for filename in os.listdir(served_filesPath):
         Files.append(filename)
     return Files
 
 def GetFileSize(Filename):
     #Function to get Size of File based on filename
-    size = os.path.getsize(f'served_files/{Filename}')
+
+    # Get the directory of the current script (client.py)
+    current_dir = os.path.dirname(__file__)
+
+    # Construct the path to the served_files directory
+    served_files_path = os.path.join(current_dir, 'served_files')
+
+    size = os.path.getsize(os.path.join(served_files_path, Filename ))
     return size
 
 def GetNumberOfChunks(Filesize):
@@ -344,8 +352,14 @@ class ClientMain:
             print(f"File {Filename} download failed")     
             return
         
-        #File path for the file to be downloaded
-        filepath = os.path.join("served_files", Filename)
+        # Get the directory of the current script (client.py)
+        current_dir = os.path.dirname(__file__)
+
+        # Construct the path to the served_files directory
+        served_files_path = os.path.join(current_dir, 'served_files')
+
+        # filepath of the File to be downloaded
+        filepath = os.path.join(served_files_path, Filename)
 
         # Reconstruct the file from chunks
         with open(filepath, "wb") as f:

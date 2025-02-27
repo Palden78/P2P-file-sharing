@@ -4,8 +4,11 @@ import threading
 import sys
 import time
 
-# Name of directory containing served files
-servedFilesDirectory = "served_files"
+# Get the directory of the current script (server.py)
+current_dir = os.path.dirname(__file__)
+
+# Construct the path to the served_files directory
+served_files_path = os.path.join(current_dir, 'served_files')
 
 # Set containing active file uploads
 active_file_uploads = set()
@@ -13,7 +16,7 @@ active_file_uploads = set()
 
 def GetFileSize(Filename):
     #Function to get Size of File based on filename
-    size = os.path.getsize(f'served_files/{Filename}')
+    size = os.path.getsize(os.path.join(served_files_path, Filename ))
     return size
 
 
@@ -25,7 +28,7 @@ class ServerThread(threading.Thread):
     def FILELIST_SERVER(self,client_socket):
         print("Entered filelist function")
         #Function to handle #FILELIST request from client
-        filesServed = " ".join(os.listdir(servedFilesDirectory))
+        filesServed = " ".join(os.listdir(served_files_path))
         responseMessage = f"200 Files served: {filesServed}"
         print(responseMessage)
         client_socket.send(responseMessage.encode("utf-8"))
@@ -34,7 +37,7 @@ class ServerThread(threading.Thread):
         print("Entered upload function")
         #Function to handle #UPLOAD request from client
         _, filename, _, file_size = request.split()
-        filepath = os.path.join(servedFilesDirectory, filename)
+        filepath = os.path.join(served_files_path, filename)
 
         #Handle different cases during upload
         if filename in active_file_uploads:
@@ -78,7 +81,7 @@ class ServerThread(threading.Thread):
         print("Entered Download check function")
         #Function to handle phase 1 #DOWNLOAD request from client
         _, filename = request.split()
-        filepath = os.path.join(servedFilesDirectory, filename)
+        filepath = os.path.join(served_files_path, filename)
 
         if filename in active_file_uploads:
             #The file the client wants to download is currently being uploaded to the server
@@ -98,7 +101,7 @@ class ServerThread(threading.Thread):
     def HANDLE_DOWNLOAD_CHUNK_REQUEST(self, client_socket, filename, chunk_ID):
         print("Entered Handle Download chunk request function")
         #Function to handle phase 2 #DOWNLOAD request from client
-        filepath = os.path.join(servedFilesDirectory, filename)
+        filepath = os.path.join(served_files_path, filename)
         chunkSize = 100
 
         try:
@@ -182,7 +185,7 @@ def getServerPortNumber(peerID):
     #Function used to get the Port number of the server
 
     #Get the filepath of peer_settings.txt file 
-    file_path = os.path.join("..", "peer_settings.txt")
+    file_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "peer_settings.txt")
     with open(file_path, "r") as file:
         for Line in file:
             peer_id, ip, port = Line.strip().split()
