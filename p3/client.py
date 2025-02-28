@@ -131,6 +131,7 @@ class ClientMain:
         chunk_size = 100  # Define the chunk size (in bytes)
         SizeOfFile = GetFileSize(Filename)   # Get the size of the file
         NumberOfChunksInFile = GetNumberOfChunks(SizeOfFile)  #Get the number of chunks in the file
+        readytoUpload = False #variable to keep track of when the client is ready to upload to server
 
         try:
             #Try connecting to the server of the specified peer
@@ -156,6 +157,7 @@ class ClientMain:
 
                 if response_msg.startswith("330"):
                     #The server is ready to receive the file from client
+                    readytoUpload = True
 
                     with open(filepath, "rb") as f:
                         chunk_id = 0
@@ -188,13 +190,16 @@ class ClientMain:
 
                     if completion_response and "200 File" in completion_response:
                         print(f"File {Filename} upload success")
-                    else:
-                        print(f"File {Filename} upload failed to {Peer_Id}")  
+                    
         except Exception as ex:
             if self.stop_event.is_set():
                 return
             else:
-                print(f"TCP connection to server {Peer_Id} failed")
+                if readytoUpload == False:
+                    print(f"TCP connection to server {Peer_Id} failed")
+                else:
+                    print(f"TCP connection to server {Peer_Id} failed")
+                    print(f"File {Filename} upload failed") 
 
     
     def SendDownloadRequest(self,Peer_Id, Request, Filename, initialRequest = True):
