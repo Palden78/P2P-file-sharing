@@ -70,7 +70,7 @@ class ClientThread(threading.Thread):
     def run(self):
         try:
             while not self.stop_event.is_set():
-                # Call the target function (add logic here to check for stop signals if needed)
+                # Call the target function
                 self.target(*self.args)
                 break
         except Exception as e:
