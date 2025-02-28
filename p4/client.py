@@ -114,7 +114,7 @@ class ClientMain:
                 return response_msg
             
         except Exception as ex:
-            print(f"TCP connection to {Peer_Id} has failed: {ex}")
+            print(f"TCP connection to server {Peer_Id} failed")
     
 
     def SendUploadRequest(self,Peer_Id, Request,filepath, Filename):
@@ -192,10 +192,9 @@ class ClientMain:
                         print(f"File {Filename} upload failed to {Peer_Id}")  
         except Exception as ex:
             if self.stop_event.is_set():
-                print(f"File {Filename} upload failed")
+                return
             else:
                 print(f"TCP connection to server {Peer_Id} failed")
-                print(f"File {Filename} upload failed")
 
     
     def SendDownloadRequest(self,Peer_Id, Request, Filename, initialRequest = True):
@@ -283,7 +282,7 @@ class ClientMain:
                 thread.join()
 
         except KeyboardInterrupt:
-            print("\nKeyboardInterrupt detected! Client is shutting down")
+            #Client leaves/quits during #UPLOAD in process
             self.stop_event.set() 
             for thread in threads:
                 thread.join()
