@@ -62,18 +62,27 @@ def GetNumberOfChunks(Filesize):
 
 
 class ClientThread(threading.Thread):
-    def __init__(self, target, *args):
+    def __init__(self, target,stop_event, *args):
         threading.Thread.__init__(self)
         self.target = target
+        self.stop_event = stop_event
         self.args = args
     def run(self):
-        self.target(*self.args)
+        try:
+            while not self.stop_event.is_set():
+                # Call the target function (add logic here to check for stop signals if needed)
+                self.target(*self.args)
+                break
+        except Exception as e:
+            print(f'shutdown {e}' )
+
 
 class ClientMain:
     #Main class of the client
     #Get the clients own local peerID based on the current directory name
     def __init__(self):
         self.LocalPeerID = os.path.basename(os.getcwd())
+        self.stop_event = threading.Event()
 
 
     def SendFileListRequest(self,Peer_Id, Request):
@@ -151,6 +160,8 @@ class ClientMain:
                     with open(filepath, "rb") as f:
                         chunk_id = 0
                         while True:
+                            if self.stop_event.is_set():
+                                raise Exception()
                             f.seek(chunk_id * chunk_size)
                             chunk = f.read(chunk_size)
                             chunkRequest = f"#UPLOAD {Filename} chunk {chunk_id} {chunk.decode('utf-8', errors='ignore')}"
@@ -180,8 +191,11 @@ class ClientMain:
                     else:
                         print(f"File {Filename} upload failed to {Peer_Id}")  
         except Exception as ex:
-            print(f"TCP connection to {Peer_Id} has failed: {ex}")
-            print(f"File {Filename} upload failed")
+            if self.stop_event.is_set():
+                print(f"File {Filename} upload failed")
+            else:
+                print(f"TCP connection to server {Peer_Id} failed")
+                print(f"File {Filename} upload failed")
 
     
     def SendDownloadRequest(self,Peer_Id, Request, Filename, initialRequest = True):
@@ -218,7 +232,7 @@ class ClientMain:
                 time.sleep(0.5)
                 return response_msg
         except Exception as ex:
-            print(f"TCP connection to {Peer_Id} has failed: {ex}")
+            print(f"TCP connection to server {Peer_Id} failed")
     
     def FILELIST(self, Peers):
         #Request to be sent to the server
@@ -227,7 +241,7 @@ class ClientMain:
         #Create an array called threads to store threads
         threads = []
         for Peer_Id in Peers:
-            thread = ClientThread(self.SendFileListRequest, Peer_Id, Request)
+            thread = ClientThread(self.SendFileListRequest, self.stop_event, Peer_Id, Request)
             thread.start()
             threads.append(thread)
         
@@ -260,15 +274,22 @@ class ClientMain:
         #Create an array called threads to store threads
         threads = []
 
-        for Peer_Id in Peers:
-            thread = ClientThread(self.SendUploadRequest, Peer_Id, Request,filepath,Filename)
-            thread.start()
-            threads.append(thread)
-        
-        #Ensure all the threads complete before returning to main Thread
-        for thread in threads:
-            thread.join()
-    
+        try:
+            for Peer_Id in Peers:
+                thread = ClientThread(self.SendUploadRequest, self.stop_event, Peer_Id, Request,filepath,Filename)
+                thread.start()
+                threads.append(thread)
+            for thread in threads:
+                thread.join()
+
+        except KeyboardInterrupt:
+            print("\nKeyboardInterrupt detected! Client is shutting down")
+            self.stop_event.set() 
+            for thread in threads:
+                thread.join()
+            sys.exit(0)
+            
+             
     def DOWNLOAD(self, Filename, Peers, currentClient):
         #First call the function to get the list of files served by local client
         FilesServed = FilesServedByClient()
@@ -298,7 +319,6 @@ class ClientMain:
             print(f"File {Filename} download failed, peers {', '.join(Peers)} are not serving the file")
             return
 
-        FileDownloadFailed = False 
         chunk_size = 100  # Define the chunk size (in bytes)
         chunk_id = 0
         chunks = {}
@@ -315,7 +335,6 @@ class ClientMain:
                 self.stop_event = stop_event
 
             def run(self):
-                nonlocal FileDownloadFailed
 
                 chunkRequest = f"#DOWNLOAD {Filename} chunk {self.chunk_id}"
 
@@ -334,7 +353,6 @@ class ClientMain:
 
         
         while True:
-
             if len(threads) != 0:
                 lastThread = threads.pop()
                 if lastThread.stop_event.is_set():  # Check if the stop event of the previous thread is set
